@@ -1,0 +1,38 @@
+train_file: 'data/coco_captions/annotations/captions_train_2014.json'
+val_file: 'data/coco_captions/annotations/captions_test_2014.json'        
+test_file: 'data/coco_captions/annotations/captions_test_2014.json'
+
+coco_root: 'img_root/coco_2014/'
+
+# General config
+device: 'cpu'
+model_output_dir: 'output/models/'
+result_output_dir: 'output/results/'
+
+# Data loader config
+batch_size_train: 5
+batch_size_test: 5
+batch_size_val: 5
+
+# Dataset config
+image_size: 224
+max_words_per_cap: 50
+eos: '[SEP]'
+
+# Pretrained model config
+clip_name: 'openai/clip-vit-base-patch16'
+bert_tokenizer_name: 'bert-base-uncased'
+bert_prefix_name: 'bert-base-uncased'
+
+# Model decoder config
+bert_config: 'configs/bert_config.json'
+num_layers: 12
+nhead: 12
+dim_feedforward: 2048
+dropout: 0.1
+vocab_size: 30522 # use bert vocab size and bert tokenizer
+
+
+# Optimizer and Scheduler config
+optimizer: {opt: adamW, lr: 1e-5, weight_decay: 0.02}
+scheduler: {sched: cosine, lr: 1e-5, num_epochs: 5, min_lr: 1e-6, decay_rate: 1, warmup_lr: 1e-5, warmup_epochs: 4, cooldown_epochs: 0}

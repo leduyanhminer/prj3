@@ -1,0 +1,1 @@
+1. Create `data/coco_captions` folder and dowload 2014 train/val annotations from coco offcial link: [https://cocodataset.org/#download](https://cocodataset.org/#download). We only use `captions_val2014.json` file. Final result will look like this `data/coco_captions/annotations/captions_val2014.json`
