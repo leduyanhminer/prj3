@@ -23,6 +23,7 @@ class CocoCaptioner(nn.Module):
         )
         self.memory_adapter = MemoryAdapterLayer(dim_query=768, dim_mem=512)
         self.fc = nn.Linear(768, config['vocab_size'])
+        self.img_emb_transform = nn.Linear(512, 768)
         
     def _cal_loss(self, prediction, caption_ids):
         # Dịch caption sang trái và loại bỏ từ cuối cùng
@@ -43,33 +44,66 @@ class CocoCaptioner(nn.Module):
         return loss
 
             
-    def forward(self, image, caption=None, is_train=True):
+    def forward(self, image, caption=None):
+        # image: (batch_size, 3, 224, 224)
+        image = image.to(dtype=next(self.parameters()).dtype) 
+        # image_embeds: (batch_size, 512)
+        image_embeds = self.visual_encoder.get_image_features(image)
+        image_embeds = image_embeds.unsqueeze(1) # (batch_size, 1, 512)   
+
+        # caption_embeds: (batch_size, max_words_per_cap, 768)
+        caption_embeds = self.word_embedder(caption.input_ids, attention_mask=caption.attention_mask).last_hidden_state 
+        position_ids = torch.arange(0, caption.input_ids.size(1)).unsqueeze(0)
+        positional_embeddings = self.positional_embedding(position_ids)
+        caption_embeds = caption_embeds + positional_embeddings
+
+        # caption_embeds, image_embeds = self.memory_adapter(caption_embeds, image_embeds)
+        image_embeds = self.img_emb_transform(image_embeds)
+
+        # output: (batch_size, max_words_per_cap, 768)
+        output = self.text_decoder(caption_embeds, image_embeds)
+
+        # output: (batch_size, max_words_per_cap, vocab_size)
+        output = self.fc(output)
+        prediction = F.softmax(output, dim=2)
+        print("prediction:", prediction.shape, prediction)
+        cap = caption.input_ids
+        print("caption:", cap.shape, cap)
+        loss = self._cal_loss(prediction, caption.input_ids)
+        print(loss)
+        return loss
+    
+    def simple_gen(self, image, temperature=1.0, max_length=50):
         # image: (batch_size, 3, 224, 224)
         image = image.to(dtype=next(self.parameters()).dtype) 
         # image_embeds: (batch_size, 512)
         image_embeds = self.visual_encoder.get_image_features(image)
         image_embeds = image_embeds.unsqueeze(1) # (batch_size, 1, 512)
+        image_embeds = self.img_emb_transform(image_embeds)
 
-        if is_train:      
-            # caption_embeds: (batch_size, max_words_per_cap, 768)
-            caption_embeds = self.word_embedder(caption.input_ids, attention_mask=caption.attention_mask).last_hidden_state 
-            position_ids = torch.arange(0, caption.input_ids.size(1)).unsqueeze(0)
-            positional_embeddings = self.positional_embedding(position_ids)
-            caption_embeds = caption_embeds + positional_embeddings
+        initial_tokens = [self.tokenizer.cls_token_id] * image_embeds.size(0)
+        tokens = torch.tensor(initial_tokens, device=image_embeds.device).unsqueeze(-1)  # (batch_size, 1)
 
-            # caption_embeds, image_embeds = self.memory_adapter(caption_embeds, image_embeds)
-            image_embeds = nn.Linear(512, 768)(image_embeds) # (batch_size, 1, 768)
+        for _ in range(max_length):
+            token_embeds = self.word_embedder(tokens)[0]  # Đảm bảo kích thước: (batch_size, seq_len, embed_dim)
 
-            # output: (batch_size, max_words_per_cap, 768)
-            output = self.text_decoder(caption_embeds, image_embeds)
+            # Sinh từ tiếp theo
+            output = self.text_decoder(token_embeds, image_embeds)
+            output = self.fc(output[:, -1, :])  # Chỉ lấy embedding của từ cuối cùng
 
-            # output: (batch_size, max_words_per_cap, vocab_size)
-            output = self.fc(output)
-            prediction = F.softmax(output, dim=2)
-            print("prediction:", prediction.shape, prediction)
-            cap = caption.input_ids
-            print("caption:", cap.shape, cap)
-            loss = self._cal_loss(prediction, caption.input_ids)
-            print(loss)
-            return loss
-        return image_embeds
+            if temperature == 0:
+                next_token = torch.argmax(output, dim=-1).unsqueeze(-1)
+            else:
+                output = output / temperature
+                next_token = torch.multinomial(F.softmax(output, dim=-1), num_samples=1)
+
+            tokens = torch.cat([tokens, next_token], dim=1)
+
+            # Kiểm tra token '[SEP]'
+            if torch.all(next_token == self.tokenizer.sep_token_id):
+                break
+
+        # Decode token IDs sang văn bản
+        results = [self.tokenizer.decode(t, skip_special_tokens=True) for t in tokens]
+        return results
+

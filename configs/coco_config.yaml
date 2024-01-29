@@ -10,9 +10,9 @@ model_output_dir: 'output/models/'
 result_output_dir: 'output/results/'
 
 # Data loader config
-batch_size_train: 5
-batch_size_test: 5
-batch_size_val: 5
+batch_size_train: 1
+batch_size_test: 1
+batch_size_val: 1
 
 # Dataset config
 image_size: 224
